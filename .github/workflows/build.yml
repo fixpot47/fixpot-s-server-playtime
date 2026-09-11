@@ -30,7 +30,9 @@ jobs:
       - name: Prepare final jar
         run: |
           mkdir -p dist
-          cp build/libs/fixpot-s-server-playtime-1.0.0.jar dist/fixpot-s-server-playtime.jar
+          JAR=$(find build/libs -maxdepth 1 -type f -name 'fixpot-s-server-playtime-*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' | head -n 1)
+          test -n "$JAR"
+          cp "$JAR" dist/fixpot-s-server-playtime.jar
 
       - name: Upload mod jar
         uses: actions/upload-artifact@v4
