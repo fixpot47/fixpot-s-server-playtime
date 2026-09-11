@@ -3,13 +3,14 @@
   "id": "fixpotsserverplaytime",
   "version": "${version}",
   "name": "fixpot's Server Playtime",
-  "description": "Automatically tracks how long you play on each Minecraft server.",
+  "description": "Tracks playtime for multiplayer servers, singleplayer worlds, and Realms directly in Minecraft's built-in lists.",
   "authors": ["fixpot47"],
   "license": "MIT",
   "environment": "client",
   "entrypoints": {
     "client": ["dev.fixpot47.fixpotsserverplaytime.FixpotsServerPlaytimeClient"]
   },
+  "mixins": ["fixpotsserverplaytime.mixins.json"],
   "depends": {
     "fabricloader": ">=0.19.3",
     "minecraft": "~26.2",
