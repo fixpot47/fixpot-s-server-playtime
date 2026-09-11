@@ -4,99 +4,138 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.network.chat.Component;
+import net.minecraft.server.integrated.IntegratedServer;
 
+import java.nio.file.Path;
 import java.util.Locale;
 
 public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
-    private static final long SAVE_INTERVAL_MS = 60_000L;
-    private static final int JOIN_MESSAGE_DELAY_TICKS = 40;
+    private static final long SAVE_INTERVAL_MS = 30_000L;
+    private static final ServerPlaytimeStore STORE = new ServerPlaytimeStore();
 
-    private final ServerPlaytimeStore store = new ServerPlaytimeStore();
+    private static String pendingRealmKey;
+    private static String pendingRealmName;
 
-    private String currentServerKey;
-    private String currentServerName;
+    private String currentKey;
+    private String currentName;
     private long lastAccountedAtMs;
-    private int joinMessageTicks;
-    private boolean joinMessageShown;
 
     @Override
     public void onInitializeClient() {
-        store.load();
+        STORE.load();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
     }
 
     private void onClientTick(Minecraft client) {
-        ServerData server = client.getCurrentServer();
+        SessionTarget target = resolveTarget(client);
 
-        if (client.getConnection() == null || server == null) {
+        if (target == null) {
             finishCurrentSession();
             return;
         }
 
-        String key = normalizeServerKey(server.ip);
-        String name = server.name == null || server.name.isBlank() ? server.ip : server.name;
-
-        if (currentServerKey == null || !currentServerKey.equals(key)) {
+        if (currentKey == null || !currentKey.equals(target.key())) {
             finishCurrentSession();
-            startSession(key, name);
+            startSession(target.key(), target.name());
         }
 
         long now = System.currentTimeMillis();
-
-        if (!joinMessageShown && client.player != null) {
-            joinMessageTicks++;
-            if (joinMessageTicks >= JOIN_MESSAGE_DELAY_TICKS) {
-                long totalMillis = store.getMillis(currentServerKey) + Math.max(0L, now - lastAccountedAtMs);
-                client.gui.hud.getChat().addClientSystemMessage(
-                        Component.literal("Server playtime: " + formatDuration(totalMillis))
-                );
-                joinMessageShown = true;
-            }
-        }
-
         if (now - lastAccountedAtMs >= SAVE_INTERVAL_MS) {
             checkpoint(now);
         }
     }
 
+    private SessionTarget resolveTarget(Minecraft client) {
+        if (client.player == null || client.level == null) {
+            return null;
+        }
+
+        if (client.hasSingleplayerServer()) {
+            IntegratedServer server = client.getSingleplayerServer();
+            if (server == null) {
+                return null;
+            }
+
+            Path directory = server.getServerDirectory();
+            Path fileName = directory == null ? null : directory.getFileName();
+            String levelId = fileName == null ? "unknown" : fileName.toString();
+            String levelName = server.getWorldData().getLevelName();
+            return new SessionTarget(worldKey(levelId), levelName == null || levelName.isBlank() ? levelId : levelName);
+        }
+
+        ServerData server = client.getCurrentServer();
+        if (client.getConnection() == null || server == null) {
+            return null;
+        }
+
+        if (server.isRealm() && pendingRealmKey != null) {
+            return new SessionTarget(pendingRealmKey, pendingRealmName == null ? server.name : pendingRealmName);
+        }
+
+        String name = server.name == null || server.name.isBlank() ? server.ip : server.name;
+        return new SessionTarget(serverKey(server.ip), name);
+    }
+
     private void startSession(String key, String name) {
-        currentServerKey = key;
-        currentServerName = name;
+        currentKey = key;
+        currentName = name == null ? "" : name;
         lastAccountedAtMs = System.currentTimeMillis();
-        joinMessageTicks = 0;
-        joinMessageShown = false;
     }
 
     private void checkpoint(long now) {
-        if (currentServerKey == null) {
+        if (currentKey == null) {
             return;
         }
 
         long delta = Math.max(0L, now - lastAccountedAtMs);
-        store.addMillis(currentServerKey, currentServerName, delta);
+        STORE.addMillis(currentKey, currentName, delta);
         lastAccountedAtMs = now;
-        store.save();
+        STORE.save();
     }
 
     private void finishCurrentSession() {
-        if (currentServerKey == null) {
+        if (currentKey == null) {
             return;
         }
 
         checkpoint(System.currentTimeMillis());
-        currentServerKey = null;
-        currentServerName = null;
+        currentKey = null;
+        currentName = null;
         lastAccountedAtMs = 0L;
-        joinMessageTicks = 0;
-        joinMessageShown = false;
     }
 
-    private static String normalizeServerKey(String address) {
-        return address == null ? "unknown" : address.strip().toLowerCase(Locale.ROOT);
+    public static void prepareRealm(long realmId, String realmName) {
+        pendingRealmKey = realmKey(realmId);
+        pendingRealmName = realmName;
     }
 
-    private static String formatDuration(long millis) {
+    public static String multiplayerPlaytime(String address) {
+        return formatDuration(STORE.getMillis(serverKey(address)));
+    }
+
+    public static String singleplayerPlaytime(String levelId) {
+        return formatDuration(STORE.getMillis(worldKey(levelId)));
+    }
+
+    public static String realmPlaytime(long realmId) {
+        return formatDuration(STORE.getMillis(realmKey(realmId)));
+    }
+
+    public static String serverKey(String address) {
+        String normalized = address == null ? "unknown" : address.strip().toLowerCase(Locale.ROOT);
+        return "server:" + normalized;
+    }
+
+    public static String worldKey(String levelId) {
+        String normalized = levelId == null ? "unknown" : levelId.strip();
+        return "world:" + normalized;
+    }
+
+    public static String realmKey(long realmId) {
+        return "realm:" + realmId;
+    }
+
+    public static String formatDuration(long millis) {
         long totalMinutes = Math.max(0L, millis) / 60_000L;
         long hours = totalMinutes / 60L;
         long minutes = totalMinutes % 60L;
@@ -106,5 +145,8 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
         }
 
         return minutes + "m";
+    }
+
+    private record SessionTarget(String key, String name) {
     }
 }
