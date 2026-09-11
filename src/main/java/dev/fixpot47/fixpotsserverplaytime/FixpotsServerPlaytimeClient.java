@@ -10,7 +10,7 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
-    private static final long SAVE_INTERVAL_MS = 30_000L;
+    private static final long SAVE_INTERVAL_MS = 5_000L;
     private static final ServerPlaytimeStore STORE = new ServerPlaytimeStore();
 
     private String currentKey;
@@ -21,6 +21,16 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
     public void onInitializeClient() {
         STORE.load();
         ClientTickEvents.END_CLIENT_TICK.register(this::onClientTick);
+
+        // Extra safety: persist the current session even if Minecraft is closed
+        // while the player is still inside a world/server/Realm.
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                finishCurrentSession();
+                STORE.save();
+            } catch (Exception ignored) {
+            }
+        }, "fixpots-server-playtime-save"));
     }
 
     private void onClientTick(Minecraft client) {
@@ -73,24 +83,26 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
         return new SessionTarget(serverKey(server.ip), name);
     }
 
-    private void startSession(String key, String name) {
+    private synchronized void startSession(String key, String name) {
         currentKey = key;
         currentName = name == null ? "" : name;
         lastAccountedAtMs = System.currentTimeMillis();
     }
 
-    private void checkpoint(long now) {
+    private synchronized void checkpoint(long now) {
         if (currentKey == null) {
             return;
         }
 
         long delta = Math.max(0L, now - lastAccountedAtMs);
-        STORE.addMillis(currentKey, currentName, delta);
+        if (delta > 0L) {
+            STORE.addMillis(currentKey, currentName, delta);
+        }
         lastAccountedAtMs = now;
         STORE.save();
     }
 
-    private void finishCurrentSession() {
+    private synchronized void finishCurrentSession() {
         if (currentKey == null) {
             return;
         }
