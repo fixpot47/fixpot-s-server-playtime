@@ -22,8 +22,13 @@ public abstract class SingleplayerWorldEntryMixin {
 
         String text = "Playtime: " + FixpotsServerPlaytimeClient.singleplayerPlaytime(summary.getLevelId());
         Minecraft client = Minecraft.getInstance();
+
+        // Keep playtime on the same top line as the world name,
+        // aligned to the right side of the world entry so it never sits
+        // on top of the mode/version text below.
         int x = entry.getContentX() + entry.getContentWidth() - client.font.width(text) - 5;
-        int y = entry.getContentY() + entry.getContentHeight() - 10;
+        int y = entry.getContentY() + 2;
+
         graphics.text(client.font, text, x, y, 0xFFAAAAAA, false);
     }
 }
