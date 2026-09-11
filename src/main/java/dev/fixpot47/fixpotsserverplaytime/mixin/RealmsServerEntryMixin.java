@@ -26,7 +26,7 @@ public abstract class RealmsServerEntryMixin {
         ObjectSelectionList.Entry<?> entry = (ObjectSelectionList.Entry<?>) (Object) this;
         String text = "Playtime: " + FixpotsServerPlaytimeClient.realmPlaytime(server.name);
         Minecraft client = Minecraft.getInstance();
-        int x = entry.getContentX() + entry.getContentWidth() - client.font.width(text) - 5;
+        int x = entry.getContentX() + entry.getContentWidth() - client.font.width(text) - 5 + 10;
         int y = entry.getContentY() + entry.getContentHeight() - 10;
         graphics.text(client.font, text, x, y, 0xFFAAAAAA, false);
     }
