@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "dev.fixpot47.fixpotsserverplaytime.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MultiplayerServerEntryMixin",
+    "SingleplayerWorldEntryMixin",
+    "RealmsServerEntryMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
