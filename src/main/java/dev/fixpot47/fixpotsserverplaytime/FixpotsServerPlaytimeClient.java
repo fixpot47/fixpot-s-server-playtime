@@ -13,9 +13,6 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
     private static final long SAVE_INTERVAL_MS = 30_000L;
     private static final ServerPlaytimeStore STORE = new ServerPlaytimeStore();
 
-    private static String pendingRealmKey;
-    private static String pendingRealmName;
-
     private String currentKey;
     private String currentName;
     private long lastAccountedAtMs;
@@ -68,11 +65,11 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
             return null;
         }
 
-        if (server.isRealm() && pendingRealmKey != null) {
-            return new SessionTarget(pendingRealmKey, pendingRealmName == null ? server.name : pendingRealmName);
+        String name = server.name == null || server.name.isBlank() ? server.ip : server.name;
+        if (server.isRealm()) {
+            return new SessionTarget(realmKey(name), name);
         }
 
-        String name = server.name == null || server.name.isBlank() ? server.ip : server.name;
         return new SessionTarget(serverKey(server.ip), name);
     }
 
@@ -104,11 +101,6 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
         lastAccountedAtMs = 0L;
     }
 
-    public static void prepareRealm(long realmId, String realmName) {
-        pendingRealmKey = realmKey(realmId);
-        pendingRealmName = realmName;
-    }
-
     public static String multiplayerPlaytime(String address) {
         return formatDuration(STORE.getMillis(serverKey(address)));
     }
@@ -117,8 +109,8 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
         return formatDuration(STORE.getMillis(worldKey(levelId)));
     }
 
-    public static String realmPlaytime(long realmId) {
-        return formatDuration(STORE.getMillis(realmKey(realmId)));
+    public static String realmPlaytime(String realmName) {
+        return formatDuration(STORE.getMillis(realmKey(realmName)));
     }
 
     public static String serverKey(String address) {
@@ -131,8 +123,9 @@ public final class FixpotsServerPlaytimeClient implements ClientModInitializer {
         return "world:" + normalized;
     }
 
-    public static String realmKey(long realmId) {
-        return "realm:" + realmId;
+    public static String realmKey(String realmName) {
+        String normalized = realmName == null ? "unknown" : realmName.strip().toLowerCase(Locale.ROOT);
+        return "realm:" + normalized;
     }
 
     public static String formatDuration(long millis) {
