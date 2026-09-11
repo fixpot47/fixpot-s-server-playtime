@@ -2,68 +2,101 @@ package dev.fixpot47.fixpotsserverplaytime;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
-import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.Map;
 
 final class ServerPlaytimeStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-    private static final Type DATA_TYPE = new TypeToken<Map<String, Entry>>() { }.getType();
     private static final Path FILE = FabricLoader.getInstance().getConfigDir().resolve("fixpots-server-playtime.json");
+    private static final Path TEMP_FILE = FabricLoader.getInstance().getConfigDir().resolve("fixpots-server-playtime.json.tmp");
 
-    private final Map<String, Entry> entries = new HashMap<>();
+    private final Map<String, Long> millisByKey = new HashMap<>();
 
-    void load() {
-        entries.clear();
+    synchronized void load() {
+        millisByKey.clear();
         if (!Files.exists(FILE)) {
             return;
         }
 
         try (Reader reader = Files.newBufferedReader(FILE, StandardCharsets.UTF_8)) {
-            Map<String, Entry> loaded = GSON.fromJson(reader, DATA_TYPE);
-            if (loaded != null) {
-                entries.putAll(loaded);
+            JsonElement rootElement = JsonParser.parseReader(reader);
+            if (!rootElement.isJsonObject()) {
+                return;
             }
-        } catch (Exception ignored) {
+
+            JsonObject root = rootElement.getAsJsonObject();
+            for (Map.Entry<String, JsonElement> item : root.entrySet()) {
+                JsonElement value = item.getValue();
+                long millis = 0L;
+
+                // Current format: "server:example.com": 123456
+                if (value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()) {
+                    millis = value.getAsLong();
+                }
+                // Migration from older versions:
+                // "server:example.com": { "serverName": "Example", "millis": 123456 }
+                else if (value != null && value.isJsonObject()) {
+                    JsonElement oldMillis = value.getAsJsonObject().get("millis");
+                    if (oldMillis != null && oldMillis.isJsonPrimitive() && oldMillis.getAsJsonPrimitive().isNumber()) {
+                        millis = oldMillis.getAsLong();
+                    }
+                }
+
+                if (millis > 0L) {
+                    millisByKey.put(item.getKey(), millis);
+                }
+            }
+        } catch (Exception exception) {
+            System.err.println("[fixpot's Server Playtime] Could not load playtime data: " + exception.getMessage());
         }
     }
 
-    long getMillis(String key) {
-        Entry entry = entries.get(key);
-        return entry == null ? 0L : Math.max(0L, entry.millis);
+    synchronized long getMillis(String key) {
+        return Math.max(0L, millisByKey.getOrDefault(key, 0L));
     }
 
-    void addMillis(String key, String serverName, long millis) {
-        if (millis <= 0L) {
+    synchronized void addMillis(String key, String serverName, long millis) {
+        if (key == null || millis <= 0L) {
             return;
         }
 
-        Entry entry = entries.computeIfAbsent(key, ignored -> new Entry());
-        entry.serverName = serverName;
-        entry.millis = Math.max(0L, entry.millis) + millis;
+        long current = Math.max(0L, millisByKey.getOrDefault(key, 0L));
+        millisByKey.put(key, current + millis);
     }
 
-    void save() {
+    synchronized void save() {
         try {
             Files.createDirectories(FILE.getParent());
-            try (Writer writer = Files.newBufferedWriter(FILE, StandardCharsets.UTF_8)) {
-                GSON.toJson(entries, DATA_TYPE, writer);
-            }
-        } catch (IOException ignored) {
-        }
-    }
 
-    private static final class Entry {
-        String serverName = "";
-        long millis = 0L;
+            try (Writer writer = Files.newBufferedWriter(TEMP_FILE, StandardCharsets.UTF_8)) {
+                GSON.toJson(millisByKey, writer);
+            }
+
+            try {
+                Files.move(
+                        TEMP_FILE,
+                        FILE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE
+                );
+            } catch (AtomicMoveNotSupportedException ignored) {
+                Files.move(TEMP_FILE, FILE, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            System.err.println("[fixpot's Server Playtime] Could not save playtime data: " + exception.getMessage());
+        }
     }
 }
